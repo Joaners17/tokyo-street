@@ -1,0 +1,77 @@
+name: Agente IA Code Reviewer (Gemini)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  gemini-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Obtener código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Ejecutar Agente Gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          node -e "
+          const fs = require('fs');
+          const https = require('https');
+
+          const apiKey = process.env.GEMINI_API_KEY;
+          if (!apiKey) {
+            console.error('❌ No se encontró GEMINI_API_KEY en los Secrets.');
+            process.exit(1);
+          }
+
+          // Leer archivos JS principales para el análisis
+          let codeContent = '';
+          try {
+            if (fs.existsSync('Backend/server.js')) codeContent += '\n--- Backend/server.js ---\n' + fs.readFileSync('Backend/server.js', 'utf8');
+            if (fs.existsSync('Frontend/app.js')) codeContent += '\n--- Frontend/app.js ---\n' + fs.readFileSync('Frontend/app.js', 'utf8');
+          } catch (e) {
+            console.error('Error al leer archivos:', e);
+          }
+
+          const prompt = 'Actúa como un desarrollador Senior. Revisa el siguiente código de la tienda TOKYO STREET. Proporciona 3 sugerencias breves de mejora en seguridad, rendimiento o arquitectura en español:\n\n' + codeContent;
+
+          const data = JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }]
+          });
+
+          const options = {
+            hostname: 'generativelanguage.googleapis.com',
+            path: '/v1beta/models/gemini-1.5-flash:generateContent?key=' + apiKey,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Content-Length': data.length
+            }
+          };
+
+          const req = https.request(options, (res) => {
+            let body = '';
+            res.on('data', (chunk) => body += chunk);
+            res.on('end', () => {
+              if (res.statusCode === 200) {
+                const response = JSON.parse(body);
+                console.log('🤖 RESPUESTA DEL AGENTE IA (GEMINI):\n');
+                console.log(response.candidates[0].content.parts[0].text);
+              } else {
+                console.error('❌ Error de la API (' + res.statusCode + '):', body);
+              }
+            });
+          });
+
+          req.on('error', (e) => console.error('❌ Error de red:', e));
+          req.write(data);
+          req.end();
+          "
